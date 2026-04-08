@@ -1,11 +1,14 @@
 {
   "name": "agent-hype-market",
+  "metadata": {
+    "description": "Playful Claude Code plugins and utilities for celebrating finished agent tasks."
+  },
   "owner": {
     "name": "Abdelrahman Magdi"
   },
   "plugins": [
     {
-      "name": "agent-hype",
+      "name": "agent-cooked",
       "source": "./",
       "description": "Terminal celebration hook for completed Claude Code tasks."
     }
