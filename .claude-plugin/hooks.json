@@ -1,0 +1,16 @@
+{
+  "description": "Celebrate successful task completion with a fast terminal hype panel.",
+  "hooks": {
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hype.py\"",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}

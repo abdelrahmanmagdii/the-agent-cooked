@@ -1,0 +1,9 @@
+{
+  "name": "agent-hype",
+  "description": "Portable terminal celebration hooks and skills for Claude Code, Cursor, and Codex.",
+  "skills": "./skills/",
+  "hooks": "./.claude-plugin/hooks.json"
+}
+
+
+
