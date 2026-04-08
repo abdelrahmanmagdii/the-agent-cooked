@@ -46,12 +46,16 @@ DEFAULT_MAX_PARTICLE_AGE = 10
 
 ROCKET_HEAD = "▲"
 ROCKET_FIZZLE_HEAD = "▼"   # the rocket has accepted its fate and is going down
+ROCKET_HEAD_LEFT = "◄"     # wrong-way rocket drifting left
+ROCKET_HEAD_RIGHT = "►"    # wrong-way rocket drifting right
 ROCKET_TAIL = "|"
 PFFT_GLYPH = "°"           # sad puff left behind by a fizzler
 
-# Stick-figure runner. Single-cell ASCII so the grid stays aligned.
-RUNNER_GLYPH_RUN = "λ"     # legs mid-stride
-RUNNER_GLYPH_JUMP = "Y"    # arms-up mid-jump
+# Runner. A duck. Why a duck? Because a duck doing gymnastics to dodge
+# firework debris is funnier than a person doing the same thing. Both
+# glyphs are double-width emoji and live in WIDE_GLYPHS below.
+RUNNER_GLYPH_RUN = "🦆"    # waddling along the bottom row
+RUNNER_GLYPH_JUMP = "🦆"   # the duck has, somehow, learned to cartwheel
 RUNNER_COLOR = "bright_white"
 
 # Bug variety. All three emoji render as two terminal cells, so ``paint``
@@ -61,11 +65,12 @@ BUG_COLOR = "bright_red"
 SPLAT_GLYPH = "✶"          # what's left after the runner stomps a bug
 SPLAT_COLOR = "bright_yellow"
 SPLAT_LIFETIME = 6         # frames the splat stays visible after stomp
-WIDE_GLYPHS = frozenset(BUG_GLYPHS)
+WIDE_GLYPHS = frozenset(BUG_GLYPHS) | {RUNNER_GLYPH_RUN, RUNNER_GLYPH_JUMP}
 
 # Comedy probabilities, tuned so each gag feels rare-but-not-unicorn.
-FIZZLE_CHANCE = 0.20  # 1 in 5 runs has a fizzler rocket
-BUG_CHANCE = 0.33     # 1 in 3 runs has a bug crash the party
+FIZZLE_CHANCE = 0.20      # 1 in 5 runs has a fizzler rocket
+WRONG_WAY_CHANCE = 0.10   # 1 in 10 runs has a rocket launched sideways
+BUG_CHANCE = 0.33         # 1 in 3 runs has a bug crash the party
 
 MESSAGES: Tuple[str, ...] = (
     "THE AGENT COOKED",
@@ -122,12 +127,15 @@ class Rocket:
     y: float
     apex_y: float
     color: str
+    vx: float = 0.0
     vy: float = -0.7
     exploded: bool = False
     fizzle: bool = False    # marked at spawn time; this rocket will not explode
     falling: bool = False   # set after the fizzler stalls and starts dropping
+    wrong_way: bool = False # launched sideways instead of up
 
     def step(self) -> None:
+        self.x += self.vx
         self.y += self.vy
         if self.falling:
             # Gravity only kicks in once the rocket has given up.
@@ -208,6 +216,28 @@ def emit_pfft(rocket: Rocket, count: int = 4) -> List[Particle]:
                 color="bright_black",
                 max_age=6,
                 glyph_override=PFFT_GLYPH,
+            )
+        )
+    return puff
+
+
+def emit_wall_puff(rocket: Rocket, count: int = 5) -> List[Particle]:
+    """Tiny burst for a wrong-way rocket that smacks into the wall.
+
+    Sparks rebound back the way the rocket came so the impact reads as
+    a *bonk* rather than a regular firework.
+    """
+    puff: List[Particle] = []
+    rebound = -1.0 if rocket.vx > 0 else 1.0  # reverse the rocket's direction
+    for _ in range(count):
+        puff.append(
+            Particle(
+                x=rocket.x,
+                y=rocket.y + random.uniform(-0.4, 0.4),
+                vx=random.uniform(0.2, 0.5) * rebound,
+                vy=random.uniform(-0.3, 0.1),
+                color=rocket.color,
+                max_age=5,
             )
         )
     return puff
@@ -331,9 +361,10 @@ def _check_stomp(runner: Runner, bugs: List[Bug], height: int) -> List[Particle]
     for b in bugs:
         if b.stomped or not b.landed:
             continue
-        # Bugs are 2 cells wide, so check both columns.
+        # Runner and bug are both 2 cells wide. Their footprints overlap
+        # iff their left columns are within 1 cell of each other.
         bx = int(round(b.x))
-        if rx == bx or rx == bx + 1:
+        if abs(rx - bx) <= 1:
             b.stomped = True
             debris.extend(emit_splat(b))
     return debris
@@ -366,9 +397,15 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
     colors = random.sample(ROCKET_COLORS, k=min(4, len(ROCKET_COLORS)))
 
     # Decide the comedy bits up front so the show is internally consistent.
-    fizzler_idx: Optional[int] = (
-        random.randint(0, len(schedule) - 1) if random.random() < FIZZLE_CHANCE else None
-    )
+    # Fizzler and wrong-way are mutually exclusive — only one weird rocket
+    # per show, otherwise it's too much.
+    fizzler_idx: Optional[int] = None
+    wrong_way_idx: Optional[int] = None
+    roll = random.random()
+    if roll < FIZZLE_CHANCE:
+        fizzler_idx = random.randint(0, len(schedule) - 1)
+    elif roll < FIZZLE_CHANCE + WRONG_WAY_CHANCE:
+        wrong_way_idx = random.randint(0, len(schedule) - 1)
     bug_will_spawn = random.random() < BUG_CHANCE
     bug_spawned = False
 
@@ -383,6 +420,24 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
             if sched_tick != tick:
                 continue
             is_fizzler = fizzler_idx is not None and idx == fizzler_idx
+            is_wrong_way = wrong_way_idx is not None and idx == wrong_way_idx
+            if is_wrong_way:
+                # Drift away from the nearer wall so it has room to travel
+                # before the bonk. Speed is high enough that the rocket
+                # actually reaches the wall within the animation's runtime.
+                drift = 1.5 if sched_x < width / 2 else -1.5
+                rockets.append(
+                    Rocket(
+                        x=float(sched_x),
+                        y=float(height - 4),  # mid-air, clearly launched
+                        apex_y=0.0,           # unused for wrong-way
+                        color=colors[len(rockets) % len(colors)],
+                        vx=drift,
+                        vy=0.0,
+                        wrong_way=True,
+                    )
+                )
+                continue
             apex_y = (
                 random.uniform(6.0, 8.0)  # fizzler stalls about halfway up
                 if is_fizzler
@@ -404,6 +459,28 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
                 continue
             if rocket.falling and rocket.y >= height:
                 continue  # already off the bottom of the canvas
+
+            if rocket.wrong_way:
+                # Drift sideways. Trail particle behind it (opposite of vx).
+                rocket.step()
+                trail_dx = -0.5 if rocket.vx > 0 else 0.5
+                particles.append(
+                    Particle(
+                        x=rocket.x + trail_dx,
+                        y=rocket.y + random.uniform(-0.1, 0.1),
+                        vx=0.0,
+                        vy=0.05,
+                        color=rocket.color,
+                        max_age=4,
+                    )
+                )
+                # Wall check — bonk and explode into a small puff.
+                if rocket.x <= 0 or rocket.x >= width - 1:
+                    rocket.x = max(0.0, min(float(width - 1), rocket.x))
+                    particles.extend(emit_wall_puff(rocket))
+                    rocket.exploded = True
+                continue
+
             rocket.step()
             # Trail particle on the way up; nothing on the way down so the
             # fizzler's descent reads as a sad silent flop.
@@ -470,9 +547,14 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
             cy = int(round(rocket.y))
             if cy < 0 or cy >= height:
                 continue
-            head = ROCKET_FIZZLE_HEAD if rocket.falling else ROCKET_HEAD
+            if rocket.wrong_way:
+                head = ROCKET_HEAD_RIGHT if rocket.vx > 0 else ROCKET_HEAD_LEFT
+            elif rocket.falling:
+                head = ROCKET_FIZZLE_HEAD
+            else:
+                head = ROCKET_HEAD
             paint(grid, rocket.x, rocket.y, head, rocket.color)
-            if not rocket.falling:
+            if not rocket.falling and not rocket.wrong_way:
                 paint(grid, rocket.x, rocket.y + 1, ROCKET_TAIL, rocket.color)
         for p in particles:
             paint(grid, p.x, p.y, p.glyph, p.color)
@@ -485,7 +567,8 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
                 # else: splat has faded, leave the cell empty
             else:
                 paint(grid, b.x, b.y, b.glyph, BUG_COLOR)
-        # Runner last so it always wins its single cell on top of its row.
+        # Runner last so it wins its cells on top of its row. The runner
+        # glyphs are wide (2 cells), so paint() reserves the next column.
         if 0 <= int(round(runner.x)) < width:
             glyph = RUNNER_GLYPH_JUMP if runner.jumping else RUNNER_GLYPH_RUN
             paint(grid, runner.x, runner.y, glyph, RUNNER_COLOR)
