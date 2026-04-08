@@ -1,0 +1,13 @@
+{
+  "name": "agent-hype-market",
+  "owner": {
+    "name": "Abdelrahman Magdi"
+  },
+  "plugins": [
+    {
+      "name": "agent-hype",
+      "source": "./",
+      "description": "Terminal celebration hook for completed Claude Code tasks."
+    }
+  ]
+}
