@@ -12,10 +12,10 @@ Then celebrate.
 When the work is complete and you are ready to give the final answer, run the bundled celebration script:
 
 ```bash
-python3 scripts/hype.py
+python3 scripts/the-agent-cooked.py
 ```
 
-If the skill is installed outside the current working directory, resolve the same script from the skill bundle at `../../scripts/hype.py` relative to this `SKILL.md`.
+If the skill is installed outside the current working directory, resolve the same script from the skill bundle at `../../scripts/the-agent-cooked.py` relative to this `SKILL.md`.
 
 Rules:
 

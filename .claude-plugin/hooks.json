@@ -1,12 +1,12 @@
 {
-  "description": "Celebrate successful task completion with a fast terminal hype panel.",
+  "description": "Celebrate successful task completion with a fast terminal panel.",
   "hooks": {
     "TaskCompleted": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hype.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/the-agent-cooked.py\"",
             "timeout": 2
           }
         ]

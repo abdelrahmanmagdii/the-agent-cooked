@@ -1,10 +1,10 @@
-# agent-hype
+# the-agent-cooked
 
 Simple:
 agent finishes task.
 terminal throws party.
 
-Works with Claude Code, Codex, and Cursor.
+Works with Claude Code directly, plus Codex and Cursor through a shared skill.
 
 ## Requirements
 
@@ -25,19 +25,14 @@ Install the shared `hype` skill from this repo:
 npx skills add abdelrahmanmagdii/the-agent-cooked --skill hype
 ```
 
-You can also test from a local checkout:
-
-```bash
-npx skills add /the-agent-cooked --skill hype
-```
-
 ### Claude Code plugin
 
-Install the Claude plugin from this repo to run the celebration on
+Add the marketplace, then install the plugin to run the celebration on
 `TaskCompleted`:
 
 ```bash
-claude plugin install the-agent-cooked@abdelrahmanmagdii
+claude plugin marketplace add abdelrahmanmagdii/the-agent-cooked
+claude plugin install the-agent-cooked@the-agent-cooked
 ```
 
 ## Test
@@ -45,7 +40,7 @@ claude plugin install the-agent-cooked@abdelrahmanmagdii
 Run the script directly:
 
 ```bash
-python3 scripts/hype.py
+python3 scripts/the-agent-cooked.py
 ```
 
 If `rich` is unavailable, the script falls back to a plain completion message
@@ -54,11 +49,12 @@ and exits cleanly.
 ## Usage
 
 - Claude Code: the plugin hook runs automatically when a task completes
-- Codex and Cursor: use the shared skill/script setup in `skills/hype/SKILL.md`
+- Codex and Cursor: install the shared skill and use the `skills/hype/SKILL.md` workflow
+- Other CLIs: not guaranteed. `npx skills` only works for agents that support the Skills format
 
 ## Files
 
 - `.claude-plugin/hooks.json` wires Claude Code `TaskCompleted` to the celebration script
 - `.claude-plugin/plugin.json` defines the Claude plugin package
 - `skills/hype/SKILL.md` provides the shared skill instructions
-- `scripts/hype.py` does the actual hype
+- `scripts/the-agent-cooked.py` does the actual celebration
