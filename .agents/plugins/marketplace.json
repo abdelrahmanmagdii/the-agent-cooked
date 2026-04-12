@@ -1,0 +1,20 @@
+{
+  "name": "the-agent-cooked-local",
+  "interface": {
+    "displayName": "the-agent-cooked Local"
+  },
+  "plugins": [
+    {
+      "name": "the-agent-cooked",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -lc 'ROOT=\"$(git rev-parse --show-toplevel)\"; /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/tty 2>/dev/null || /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/null 2>&1 || true'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

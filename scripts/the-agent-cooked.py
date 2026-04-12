@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import os
 import time
 from typing import List, Optional, Tuple
 
@@ -451,6 +452,13 @@ def render_plain_fallback() -> int:
 
 def main() -> int:
     try:
+        log_path = os.environ.get("THE_AGENT_COOKED_LOG")
+        if log_path:
+            try:
+                with open(log_path, "a", encoding="utf-8") as handle:
+                    handle.write(f"{time.time()}\n")
+            except OSError:
+                pass
         if Console is None:
             return render_plain_fallback()
         return render_rich()
