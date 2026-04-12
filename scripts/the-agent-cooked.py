@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import random
-import os
+import sys
 import time
 from typing import List, Optional, Tuple
+
+import fcntl
 
 try:
     from rich.align import Align
@@ -53,15 +56,22 @@ MESSAGES: Tuple[str, ...] = (
     "TASK DESTROYED",
     "SHIP IT",
     "MERGED WITH CONFIDENCE",
-    "EZ",
-    "AGENT COOKED",
-    "W SECURED",
+    "ABSOLUTE CINEMA",
+    "EMOTE DEPLOYED",
+    "TERMINAL COOKED",
+    "DUB SECURED",
     "AGENT WENT NUCLEAR",
 )
 
 SUBTITLES: Tuple[str, ...] = (
-    "Winner Winner Chicken Dinner",
+    "default dance engaged",
+    "victory animation online",
+    "cleanest terminal emote alive",
+    "build finished, aura increased",
 )
+
+HOOK_SUBTITLE = "hook-safe celebration mode"
+HOOK_LOCK_PATH = "/tmp/the-agent-cooked-hook.lock"
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +292,7 @@ def precompute_frames(width: int, height: int) -> List["Text"]:
         grid = empty_grid(width, height)
 
         # Top caption pulse.
-        caption = "THE AGENT COOKED"
+        caption = "EMOTE ACTIVATED"
         caption_x = max(0, (width - len(caption)) // 2)
         caption_color = "bright_white" if tick % 4 < 2 else "bright_magenta"
         for i, ch in enumerate(caption):
@@ -444,86 +454,86 @@ def render_rich() -> int:
 
 
 def render_plain_fallback() -> int:
-    import sys
-
-    msg = random.choice(MESSAGES)
-    figure = random.choice(
-        [
-            ["  \\O/  ", "   |   ", "  / \\  "],
-            ["  _O/  ", "   |   ", "  / \\  "],
-            ["  \\O_  ", "   |   ", "  / \\  "],
-            [" \\O/   ", "  |\\   ", " / \\   "],
-        ]
-    )
-    sparks = random.choice(["✦", "•", "*"])
-
-    try:
-        out = open("/dev/tty", "w")
-    except OSError:
-        out = sys.stdout
-
-    w = 38
-    hr = "═" * (w - 2)
-    blank = f"  ║{' ' * (w - 2)}║"
-    pad = lambda s: f"  ║{s.center(w - 2)}║"
-
-    lines = [
-        "",
-        f"  {sparks}{' ' * (w - 2)}{sparks}",
-        f"  ╔{hr}╗",
-        blank,
-        pad(f"⚡ {msg} ⚡"),
-        blank,
-    ]
-    for row in figure:
-        lines.append(pad(row))
-    lines += [
-        blank,
-        pad("~ Winner Winner Chicken Dinner ~"),
-        f"  ╚{hr}╝",
-        f"  {sparks}{' ' * (w - 2)}{sparks}",
-        "",
-    ]
-
-    out.write("\n".join(lines) + "\n")
-    if out is not sys.stdout:
-        out.close()
+    print()
+    print("  ⚡ EMOTE DEPLOYED ⚡")
+    print()
     return 0
 
 
-def _ensure_rich() -> None:
-    """One-time silent install of rich if missing. No-op when already present."""
-    global Align, Console, Panel, Text
-    if Console is not None:
-        return
-    import subprocess, sys
+def _read_hook_event_name() -> Optional[str]:
+    if sys.stdin.isatty():
+        return None
+
     try:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q", "rich"],
-            capture_output=True,
-            timeout=15,
-        )
-        from rich.align import Align as _A
-        from rich.console import Console as _C
-        from rich.panel import Panel as _P
-        from rich.text import Text as _T
-        Align, Console, Panel, Text = _A, _C, _P, _T
-    except Exception:
-        pass
+        payload_raw = sys.stdin.read()
+    except OSError:
+        return None
+
+    if not payload_raw.strip():
+        return None
+
+    try:
+        payload = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        return None
+
+    event_name = payload.get("hook_event_name")
+    if isinstance(event_name, str):
+        return event_name
+    return None
+
+
+def _acquire_hook_lock():
+    try:
+        lock_handle = open(HOOK_LOCK_PATH, "w", encoding="utf-8")
+    except OSError:
+        return None
+
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_handle.close()
+        return None
+
+    return lock_handle
+
+
+def render_hook_safe() -> int:
+    console = _make_console()
+
+    if not console.is_terminal:
+        return render_plain_fallback()
+
+    message = random.choice(MESSAGES)
+    toast = Text()
+    toast.append("⚡ ", style="bold bright_yellow")
+    toast.append(message, style="bold bright_green")
+    toast.append(" ", style="bold bright_yellow")
+    toast.append(f"({HOOK_SUBTITLE})", style="dim italic white")
+    console.print(Align.center(toast))
+    console.line()
+    return 0
 
 
 def main() -> int:
     try:
-        log_path = os.environ.get("THE_AGENT_COOKED_LOG")
-        if log_path:
-            try:
-                with open(log_path, "a", encoding="utf-8") as handle:
-                    handle.write(f"{time.time()}\n")
-            except OSError:
-                pass
-        _ensure_rich()
+        hook_event_name = _read_hook_event_name()
+
+        if hook_event_name == "SubagentStop":
+            return 0
+
+        hook_lock = None
+        if hook_event_name is not None:
+            hook_lock = _acquire_hook_lock()
+            if hook_lock is None:
+                return 0
+
         if Console is None:
             return render_plain_fallback()
+
+        if hook_event_name is not None:
+            return render_hook_safe()
+
         return render_rich()
     except KeyboardInterrupt:
         return 0

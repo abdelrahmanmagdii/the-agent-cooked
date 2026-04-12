@@ -1,5 +1,3 @@
-hi
-
 # the-agent-cooked
 
 Simple:
@@ -29,8 +27,8 @@ npx skills add abdelrahmanmagdii/the-agent-cooked --skill hype
 
 ### Claude Code plugin
 
-Add the marketplace, then install the plugin to run the celebration on
-`TaskCompleted`:
+Add the marketplace, then install the plugin to run the celebration on the
+main completion event:
 
 ```bash
 claude plugin marketplace add abdelrahmanmagdii/the-agent-cooked
@@ -62,8 +60,8 @@ and exits cleanly.
 
 ## Usage
 
-- Claude Code: the plugin hook runs automatically when a task completes
-- Codex CLI: `.codex/hooks.json` runs the celebration automatically when a task completes
+- Claude Code: the plugin hook runs automatically when the main agent finishes
+- Codex CLI: `.codex/hooks.json` runs the celebration when the main agent finishes
 - Cursor: install the shared skill and use the `skills/hype/SKILL.md` workflow
 - Other CLIs: not guaranteed. `npx skills` only works for agents that support the Skills format
 
