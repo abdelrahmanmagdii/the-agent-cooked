@@ -1,18 +1,7 @@
 {
   "description": "Celebrate successful task completion with a fast terminal panel.",
   "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/the-agent-cooked.py\"",
-            "timeout": 2
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
+    "TaskCompleted": [
       {
         "hooks": [
           {
