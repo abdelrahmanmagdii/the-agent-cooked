@@ -1,12 +1,7 @@
-#!/usr/bin/env python3
-
-
 from __future__ import annotations
 
-import math
 import random
 import time
-from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 try:
@@ -21,88 +16,78 @@ except ImportError:
     Text = None
 
 
+# ---------------------------------------------------------------------------
 # Config
+# ---------------------------------------------------------------------------
 
-GRID_HEIGHT = 12
-GRID_WIDTH_TARGET = 64
-GRID_WIDTH_MIN = 40
+GRID_HEIGHT = 18
+GRID_WIDTH_TARGET = 72
+GRID_WIDTH_MIN = 44
 
-FPS = 30
+FPS = 14
 FRAME_DELAY = 1.0 / FPS
-FIREWORKS_DURATION = 1.55
-DEADLINE_SECONDS = 1.95    # total runtime < 2s
+ANIMATION_DURATION = 1.6
+DEADLINE_SECONDS = 1.95  # keep total runtime under 2s
 
-ROCKET_COLORS: Tuple[str, ...] = (
-    "bright_red",
+STAGE_COLOR = "bright_magenta"
+SPOTLIGHT_COLOR = "bright_black"
+
+CONFETTI_COLORS: Tuple[str, ...] = (
     "bright_yellow",
+    "bright_green",
     "bright_magenta",
     "bright_cyan",
-    "bright_green",
+    "bright_red",
+    "white",
 )
-
-# Particle ages map across these glyphs to fade explosions out smoothly.
-PARTICLE_GLYPHS: Tuple[str, ...] = ("✦", "✧", "·")
-DEFAULT_MAX_PARTICLE_AGE = 10
-
-ROCKET_HEAD = "▲"
-ROCKET_FIZZLE_HEAD = "▼"   # the rocket has accepted its fate and is going down
-ROCKET_HEAD_LEFT = "◄"     # wrong-way rocket drifting left
-ROCKET_HEAD_RIGHT = "►"    # wrong-way rocket drifting right
-ROCKET_TAIL = "|"
-PFFT_GLYPH = "°"           # sad puff left behind by a fizzler
-
-# Runner. A duck. Why a duck? Because a duck doing gymnastics to dodge
-# firework debris is funnier than a person doing the same thing. Both
-# glyphs are double-width emoji and live in WIDE_GLYPHS below.
-RUNNER_GLYPH_RUN = "🦆"    # waddling along the bottom row
-RUNNER_GLYPH_JUMP = "🦆"   # the duck has, somehow, learned to cartwheel
-RUNNER_COLOR = "bright_white"
-
-# Bug variety. All three emoji render as two terminal cells, so ``paint``
-# reserves the next column for any glyph in ``WIDE_GLYPHS``.
-BUG_GLYPHS: Tuple[str, ...] = ("🐛", "🪲", "🦟")
-BUG_COLOR = "bright_red"
-SPLAT_GLYPH = "✶"          # what's left after the runner stomps a bug
-SPLAT_COLOR = "bright_yellow"
-SPLAT_LIFETIME = 6         # frames the splat stays visible after stomp
-WIDE_GLYPHS = frozenset(BUG_GLYPHS) | {RUNNER_GLYPH_RUN, RUNNER_GLYPH_JUMP}
-
-# Comedy probabilities, tuned so each gag feels rare-but-not-unicorn.
-FIZZLE_CHANCE = 0.20      # 1 in 5 runs has a fizzler rocket
-WRONG_WAY_CHANCE = 0.10   # 1 in 10 runs has a rocket launched sideways
-BUG_CHANCE = 0.33         # 1 in 3 runs has a bug crash the party
+CONFETTI_GLYPHS: Tuple[str, ...] = ("•", "✦", "·", "*", "+")
+DANCE_PALETTE: Tuple[str, ...] = (
+    "bright_cyan",
+    "bright_magenta",
+    "bright_green",
+    "bright_yellow",
+)
 
 MESSAGES: Tuple[str, ...] = (
-    "THE AGENT COOKED",
-    "TECHNICALLY CORRECT",
-    "LGTM (didn't read)",
-    "SHIP IT BEFORE YOU READ IT",
-    "BUGS FEATURES NOW",
-    "YOUR FUTURE SELF'S PROBLEM",
-    "PASSES ON MY MACHINE",
-    "NO TESTS WERE HARMED",
+    "TASK DESTROYED",
+    "SHIP IT",
+    "MERGED WITH CONFIDENCE",
+    "EZ",
+    "AGENT COOKED",
+    "W SECURED",
+    "AGENT WENT NUCLEAR",
 )
 
-BUG_SUBTITLE_IGNORED = "(caught one, ignored it)"
-BUG_SUBTITLE_STOMPED = "(stomped it)"
+SUBTITLES: Tuple[str, ...] = (
+    "Winner Winner Chicken Dinner",
+)
 
 
 # ---------------------------------------------------------------------------
 # Particle system
 # ---------------------------------------------------------------------------
 
-@dataclass
 class Particle:
-    x: float
-    y: float
-    vx: float
-    vy: float
-    color: str
-    age: int = 0
-    max_age: int = DEFAULT_MAX_PARTICLE_AGE
-    glyph_override: Optional[str] = None  # used by pfft puffs
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        vx: float,
+        vy: float,
+        color: str,
+        max_age: int,
+        glyph: str,
+    ) -> None:
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
+        self.color = color
+        self.max_age = max_age
+        self.glyph = glyph
+        self.age = 0
 
-    def step(self, gravity: float = 0.10) -> None:
+    def step(self, gravity: float = 0.03) -> None:
         self.x += self.vx
         self.y += self.vy
         self.vy += gravity
@@ -112,154 +97,22 @@ class Particle:
     def alive(self) -> bool:
         return self.age < self.max_age
 
-    @property
-    def glyph(self) -> str:
-        if self.glyph_override is not None:
-            return self.glyph_override
-        progress = self.age / max(1, self.max_age)
-        idx = min(len(PARTICLE_GLYPHS) - 1, int(progress * len(PARTICLE_GLYPHS)))
-        return PARTICLE_GLYPHS[idx]
 
-
-@dataclass
-class Rocket:
-    x: float
-    y: float
-    apex_y: float
-    color: str
-    vx: float = 0.0
-    vy: float = -0.7
-    exploded: bool = False
-    fizzle: bool = False    # marked at spawn time; this rocket will not explode
-    falling: bool = False   # set after the fizzler stalls and starts dropping
-    wrong_way: bool = False # launched sideways instead of up
-
-    def step(self) -> None:
-        self.x += self.vx
-        self.y += self.vy
-        if self.falling:
-            # Gravity only kicks in once the rocket has given up.
-            self.vy += 0.10
-
-    @property
-    def reached_apex(self) -> bool:
-        return self.y <= self.apex_y
-
-
-@dataclass
-class Bug:
-    x: float
-    y: float
-    vx: float
-    vy: float
-    glyph: str
-    landed: bool = False
-    stomped: bool = False
-    splat_age: int = 0      # frames since stomp; used to age out the splat
-
-    def step(self, height: int, gravity: float = 0.10) -> None:
-        if self.landed or self.stomped:
-            return
-        self.x += self.vx
-        self.y += self.vy
-        self.vy += gravity
-        if self.y >= height - 1:
-            self.y = float(height - 1)
-            self.landed = True
-            self.vx = 0.0
-            self.vy = 0.0
-
-
-@dataclass
-class Runner:
-    x: float
-    y: float
-    jumping: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Burst & pfft generators
-# ---------------------------------------------------------------------------
-
-def explode(rocket: Rocket, count: int = 18) -> List[Particle]:
-    """Detonate a rocket into a ring of outward-flying particles."""
+def emit_confetti(width: int, count: int = 8) -> List[Particle]:
     particles: List[Particle] = []
-    for i in range(count):
-        # Even angular spacing with a small jitter so the ring isn't too perfect.
-        angle = (2 * math.pi * i / count) + random.uniform(-0.12, 0.12)
-        speed = random.uniform(0.7, 1.25)
+    for _ in range(count):
         particles.append(
             Particle(
-                x=rocket.x,
-                y=rocket.y,
-                vx=math.cos(angle) * speed,
-                # Vertical squash + slight upward bias gives the burst a
-                # natural arc instead of a flat circle.
-                vy=math.sin(angle) * speed * 0.55 - 0.15,
-                color=rocket.color,
-                max_age=random.randint(8, DEFAULT_MAX_PARTICLE_AGE + 2),
+                x=random.uniform(2, width - 3),
+                y=random.uniform(-1.0, 2.0),
+                vx=random.uniform(-0.22, 0.22),
+                vy=random.uniform(0.04, 0.18),
+                color=random.choice(CONFETTI_COLORS),
+                max_age=random.randint(10, 18),
+                glyph=random.choice(CONFETTI_GLYPHS),
             )
         )
     return particles
-
-
-def emit_pfft(rocket: Rocket, count: int = 4) -> List[Particle]:
-    """Sad dim puff for a fizzler that gives up partway up the screen."""
-    puff: List[Particle] = []
-    for _ in range(count):
-        puff.append(
-            Particle(
-                x=rocket.x + random.uniform(-0.4, 0.4),
-                y=rocket.y - random.uniform(0.0, 0.5),
-                vx=random.uniform(-0.15, 0.15),
-                vy=random.uniform(-0.15, -0.05),  # tiny upward dribble
-                color="bright_black",
-                max_age=6,
-                glyph_override=PFFT_GLYPH,
-            )
-        )
-    return puff
-
-
-def emit_wall_puff(rocket: Rocket, count: int = 5) -> List[Particle]:
-    """Tiny burst for a wrong-way rocket that smacks into the wall.
-
-    Sparks rebound back the way the rocket came so the impact reads as
-    a *bonk* rather than a regular firework.
-    """
-    puff: List[Particle] = []
-    rebound = -1.0 if rocket.vx > 0 else 1.0  # reverse the rocket's direction
-    for _ in range(count):
-        puff.append(
-            Particle(
-                x=rocket.x,
-                y=rocket.y + random.uniform(-0.4, 0.4),
-                vx=random.uniform(0.2, 0.5) * rebound,
-                vy=random.uniform(-0.3, 0.1),
-                color=rocket.color,
-                max_age=5,
-            )
-        )
-    return puff
-
-
-def emit_splat(bug: Bug, count: int = 6) -> List[Particle]:
-    """Tiny burst of debris when the runner stomps a bug."""
-    debris: List[Particle] = []
-    for i in range(count):
-        angle = math.pi * (i / max(1, count - 1))  # upper half-circle spread
-        speed = random.uniform(0.4, 0.8)
-        debris.append(
-            Particle(
-                x=bug.x,
-                y=bug.y,
-                vx=math.cos(angle) * speed,
-                vy=-abs(math.sin(angle)) * speed * 0.6,  # always upward
-                color=SPLAT_COLOR,
-                max_age=5,
-            )
-        )
-    return debris
 
 
 # ---------------------------------------------------------------------------
@@ -275,32 +128,27 @@ def empty_grid(width: int, height: int) -> Grid:
 
 
 def paint(grid: Grid, x: float, y: float, glyph: str, color: Optional[str]) -> None:
-    """Place a glyph in the grid, clipping to bounds.
-
-    For glyphs in ``WIDE_GLYPHS`` (e.g. 🐛, which renders as two terminal
-    cells), the next column is overwritten with a sentinel ("", None) so
-    ``grid_to_text`` knows not to append a redundant character there. The
-    wide glyph itself naturally occupies both visual cells when printed.
-    """
-    if glyph == " " or glyph == "":
+    if not glyph or glyph == " ":
         return
     cx = int(round(x))
     cy = int(round(y))
     if not (0 <= cy < len(grid) and 0 <= cx < len(grid[0])):
         return
     grid[cy][cx] = (glyph, color)
-    if glyph in WIDE_GLYPHS and cx + 1 < len(grid[0]):
-        grid[cy][cx + 1] = ("", None)
+
+
+def draw_sprite(grid: Grid, x: int, y: int, sprite: List[str], color: str) -> None:
+    for dy, row in enumerate(sprite):
+        for dx, ch in enumerate(row):
+            if ch != " ":
+                paint(grid, x + dx, y + dy, ch, color)
 
 
 def grid_to_text(grid: Grid) -> "Text":
-    """Convert a rasterized grid into a single styled Rich Text block."""
     text = Text()
     last = len(grid) - 1
     for row_idx, row in enumerate(grid):
         for glyph, color in row:
-            if glyph == "":
-                continue  # wide-glyph filler — already covered by neighbour
             if color and glyph != " ":
                 text.append(glyph, style=f"bold {color}")
             else:
@@ -311,273 +159,195 @@ def grid_to_text(grid: Grid) -> "Text":
 
 
 # ---------------------------------------------------------------------------
+# Dance frames
+# ---------------------------------------------------------------------------
+
+def make_dance_frames() -> List[List[str]]:
+    """Looping poses that read more clearly as a game-style default dance."""
+    return [
+        [
+            "      O      ",
+            "     /|_     ",
+            "    / | \\    ",
+            "      |      ",
+            "     / \\     ",
+            "    /   \\    ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "     _|\\     ",
+            "    / | \\    ",
+            "      |      ",
+            "     / \\     ",
+            "    /   \\    ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "    \\ | /    ",
+            "     \\|_     ",
+            "      |      ",
+            "     /       ",
+            "    / \\      ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "    \\ | /    ",
+            "     _|/     ",
+            "      |      ",
+            "       \\     ",
+            "      / \\    ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "     /|_     ",
+            "    / |      ",
+            "      |      ",
+            "       \\     ",
+            "      / \\    ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "     _|\\     ",
+            "      | \\    ",
+            "      |      ",
+            "     /       ",
+            "    / \\      ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "    \\ | /    ",
+            "     /|\\     ",
+            "      |      ",
+            "    _/ \\_    ",
+            "             ",
+            "             ",
+        ],
+        [
+            "      O      ",
+            "     /|\\     ",
+            "    _ | _    ",
+            "      |      ",
+            "     / \\     ",
+            "    /   \\    ",
+            "             ",
+        ],
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Animation precompute
 # ---------------------------------------------------------------------------
 
-def _runner_should_dodge(
-    runner_x: float,
-    height: int,
-    particles: List[Particle],
-    bugs: List[Bug],
-) -> bool:
-    """Decide whether the runner should jump this tick.
-
-    Anything falling (vy > 0) within ±1 column of the runner and within
-    the bottom three rows counts as incoming. Bugs in the air are always
-    a threat. Landed bugs are NOT a threat — the runner stomps those.
-    """
-    rx = int(round(runner_x))
-    danger_top = height - 3
-    danger_bot = height - 1
-    for p in particles:
-        if (
-            abs(int(round(p.x)) - rx) <= 1
-            and danger_top <= p.y <= danger_bot
-            and p.vy > 0
-        ):
-            return True
-    for b in bugs:
-        if b.landed or b.stomped:
-            continue  # grounded bugs are stomp targets, not dodge targets
-        if abs(int(round(b.x)) - rx) <= 1 and danger_top <= b.y <= danger_bot:
-            return True
-    return False
-
-
-def _check_stomp(runner: Runner, bugs: List[Bug], height: int) -> List[Particle]:
-    """If the runner is overlapping any landed bug, stomp it.
-
-    Returns any debris particles produced. Mutates ``bugs`` in place by
-    flipping the appropriate ``stomped`` flags. The runner has to be on
-    the ground (not jumping) to stomp — leaping over a bug doesn't count.
-    """
-    debris: List[Particle] = []
-    if runner.jumping:
-        return debris
-    rx = int(round(runner.x))
-    bottom = height - 1
-    if int(round(runner.y)) != bottom:
-        return debris
-    for b in bugs:
-        if b.stomped or not b.landed:
-            continue
-        # Runner and bug are both 2 cells wide. Their footprints overlap
-        # iff their left columns are within 1 cell of each other.
-        bx = int(round(b.x))
-        if abs(rx - bx) <= 1:
-            b.stomped = True
-            debris.extend(emit_splat(b))
-    return debris
-
-
-def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool]:
-    """Build the entire fireworks sequence as a list of Rich Text frames.
-
-    Returns ``(frames, bug_caught, bug_stomped)``. ``bug_caught`` is True
-    if any bug spawned and reached the ground (stomped or not).
-    ``bug_stomped`` is True if the runner walked over a landed bug — in
-    that case the reveal banner gets the "stomped it" subtitle, otherwise
-    falls back to the "caught one, ignored it" line.
-    """
-    rockets: List[Rocket] = []
-    particles: List[Particle] = []
-    bugs: List[Bug] = []
-    runner = Runner(x=2.0, y=float(height - 1))
-
-    # Four rockets, one per horizontal band, launched at staggered ticks.
-    bands = [
-        (width // 8, width // 3),
-        (width // 3, width // 2),
-        (width // 2, 2 * width // 3),
-        (2 * width // 3, 7 * width // 8),
-    ]
-    random.shuffle(bands)
-    launch_ticks = (0, 5, 10, 16)
-    schedule = [(t, random.randint(lo, hi)) for t, (lo, hi) in zip(launch_ticks, bands)]
-    colors = random.sample(ROCKET_COLORS, k=min(4, len(ROCKET_COLORS)))
-
-    # Decide the comedy bits up front so the show is internally consistent.
-    # Fizzler and wrong-way are mutually exclusive — only one weird rocket
-    # per show, otherwise it's too much.
-    fizzler_idx: Optional[int] = None
-    wrong_way_idx: Optional[int] = None
-    roll = random.random()
-    if roll < FIZZLE_CHANCE:
-        fizzler_idx = random.randint(0, len(schedule) - 1)
-    elif roll < FIZZLE_CHANCE + WRONG_WAY_CHANCE:
-        wrong_way_idx = random.randint(0, len(schedule) - 1)
-    bug_will_spawn = random.random() < BUG_CHANCE
-    bug_spawned = False
-
+def precompute_frames(width: int, height: int) -> List["Text"]:
     frames: List["Text"] = []
-    total_ticks = int(FIREWORKS_DURATION * FPS)
-    # Speed picked so the runner crosses most of the canvas over the run.
-    runner_speed = max(0.5, (width - 4) / total_ticks)
+    total_ticks = int(ANIMATION_DURATION * FPS)
+
+    dance_frames = make_dance_frames()
+    dancer_w = len(dance_frames[0][0])
+    dancer_h = len(dance_frames[0])
+
+    center_x = (width - dancer_w) // 2
+    base_y = max(3, height - dancer_h - 3)
+
+    particles: List[Particle] = []
 
     for tick in range(total_ticks):
-        # ---- Spawn scheduled rockets ----
-        for idx, (sched_tick, sched_x) in enumerate(schedule):
-            if sched_tick != tick:
-                continue
-            is_fizzler = fizzler_idx is not None and idx == fizzler_idx
-            is_wrong_way = wrong_way_idx is not None and idx == wrong_way_idx
-            if is_wrong_way:
-                # Drift away from the nearer wall so it has room to travel
-                # before the bonk. Speed is high enough that the rocket
-                # actually reaches the wall within the animation's runtime.
-                drift = 1.5 if sched_x < width / 2 else -1.5
-                rockets.append(
-                    Rocket(
-                        x=float(sched_x),
-                        y=float(height - 4),  # mid-air, clearly launched
-                        apex_y=0.0,           # unused for wrong-way
-                        color=colors[len(rockets) % len(colors)],
-                        vx=drift,
-                        vy=0.0,
-                        wrong_way=True,
-                    )
-                )
-                continue
-            apex_y = (
-                random.uniform(6.0, 8.0)  # fizzler stalls about halfway up
-                if is_fizzler
-                else random.uniform(1.5, 3.5)
-            )
-            rockets.append(
-                Rocket(
-                    x=float(sched_x),
-                    y=float(height - 1),
-                    apex_y=apex_y,
-                    color=colors[len(rockets) % len(colors)],
-                    fizzle=is_fizzler,
-                )
-            )
+        if tick % 2 == 0:
+            particles.extend(emit_confetti(width, count=7))
 
-        # ---- Update rockets ----
-        for rocket in rockets:
-            if rocket.exploded:
-                continue
-            if rocket.falling and rocket.y >= height:
-                continue  # already off the bottom of the canvas
-
-            if rocket.wrong_way:
-                # Drift sideways. Trail particle behind it (opposite of vx).
-                rocket.step()
-                trail_dx = -0.5 if rocket.vx > 0 else 0.5
-                particles.append(
-                    Particle(
-                        x=rocket.x + trail_dx,
-                        y=rocket.y + random.uniform(-0.1, 0.1),
-                        vx=0.0,
-                        vy=0.05,
-                        color=rocket.color,
-                        max_age=4,
-                    )
-                )
-                # Wall check — bonk and explode into a small puff.
-                if rocket.x <= 0 or rocket.x >= width - 1:
-                    rocket.x = max(0.0, min(float(width - 1), rocket.x))
-                    particles.extend(emit_wall_puff(rocket))
-                    rocket.exploded = True
-                continue
-
-            rocket.step()
-            # Trail particle on the way up; nothing on the way down so the
-            # fizzler's descent reads as a sad silent flop.
-            if not rocket.falling:
-                particles.append(
-                    Particle(
-                        x=rocket.x + random.uniform(-0.15, 0.15),
-                        y=rocket.y + 0.6,
-                        vx=0.0,
-                        vy=0.05,
-                        color=rocket.color,
-                        max_age=4,
-                    )
-                )
-            if not rocket.falling and rocket.reached_apex:
-                if rocket.fizzle:
-                    # Sad pfft puff. Stall the rocket and let gravity take it.
-                    particles.extend(emit_pfft(rocket))
-                    rocket.falling = True
-                    rocket.vy = 0.05
-                else:
-                    new_particles = explode(rocket)
-                    if bug_will_spawn and not bug_spawned:
-                        # Sneak a bug into the burst — it falls instead of fading.
-                        bugs.append(
-                            Bug(
-                                x=rocket.x,
-                                y=rocket.y,
-                                vx=random.uniform(-0.4, 0.4),
-                                vy=random.uniform(0.05, 0.25),
-                                glyph=random.choice(BUG_GLYPHS),
-                            )
-                        )
-                        bug_spawned = True
-                    particles.extend(new_particles)
-                    rocket.exploded = True
-
-        # ---- Update particles & bugs ----
         for p in particles:
-            p.step()
-        particles = [p for p in particles if p.alive]
+            p.step(gravity=0.028)
 
-        for b in bugs:
-            b.step(height)
+        particles = [
+            p for p in particles
+            if p.alive and -2 <= p.x < width + 2 and -2 <= p.y < height + 2
+        ]
 
-        # ---- Update runner ----
-        runner.x += runner_speed
-        runner.jumping = _runner_should_dodge(runner.x, height, particles, bugs)
-        runner.y = float(height - 2 if runner.jumping else height - 1)
+        pose = dance_frames[tick % len(dance_frames)]
 
-        # ---- Stomp check (runner is now in its new position) ----
-        particles.extend(_check_stomp(runner, bugs, height))
+        # More readable body motion than the first version.
+        bounce = [0, 1, 0, 1][tick % 4]
+        sway = [-1, 0, 1, 0][tick % 4]
+        dancer_x = center_x + sway
+        dancer_y = base_y - bounce
+        dancer_color = DANCE_PALETTE[(tick // 2) % len(DANCE_PALETTE)]
 
-        # Age splats so they fade off after a few frames.
-        for b in bugs:
-            if b.stomped:
-                b.splat_age += 1
-
-        # ---- Rasterize ----
         grid = empty_grid(width, height)
-        for rocket in rockets:
-            if rocket.exploded:
-                continue
-            cy = int(round(rocket.y))
-            if cy < 0 or cy >= height:
-                continue
-            if rocket.wrong_way:
-                head = ROCKET_HEAD_RIGHT if rocket.vx > 0 else ROCKET_HEAD_LEFT
-            elif rocket.falling:
-                head = ROCKET_FIZZLE_HEAD
-            else:
-                head = ROCKET_HEAD
-            paint(grid, rocket.x, rocket.y, head, rocket.color)
-            if not rocket.falling and not rocket.wrong_way:
-                paint(grid, rocket.x, rocket.y + 1, ROCKET_TAIL, rocket.color)
+
+        # Top caption pulse.
+        caption = "THE AGENT COOKED"
+        caption_x = max(0, (width - len(caption)) // 2)
+        caption_color = "bright_white" if tick % 4 < 2 else "bright_magenta"
+        for i, ch in enumerate(caption):
+            paint(grid, caption_x + i, 0, ch, caption_color)
+
+        # Fake spotlight columns behind the dancer.
+        spotlight_left = dancer_x + 2
+        spotlight_right = dancer_x + dancer_w - 3
+        for y in range(2, min(height - 2, dancer_y + dancer_h)):
+            if y % 2 == 0:
+                paint(grid, spotlight_left, y, "│", SPOTLIGHT_COLOR)
+                paint(grid, spotlight_right, y, "│", SPOTLIGHT_COLOR)
+
+        # Stage floor.
+        stage_y = min(height - 1, dancer_y + dancer_h)
+        for x in range(width):
+            stage_glyph = "─" if x % 2 == 0 else "_"
+            paint(grid, x, stage_y, stage_glyph, STAGE_COLOR)
+
+        # Beat lights.
+        pulse_y = max(1, stage_y - 1)
+        left_pulse_x = max(0, dancer_x - 7)
+        right_pulse_x = min(width - 1, dancer_x + dancer_w + 5)
+        center_pulse_x = width // 2
+
+        if tick % 4 in (0, 1):
+            pulse_on = "◉"
+            pulse_color = "bright_yellow"
+        else:
+            pulse_on = "○"
+            pulse_color = "bright_black"
+
+        paint(grid, left_pulse_x, pulse_y, pulse_on, pulse_color)
+        paint(grid, right_pulse_x, pulse_y, pulse_on, pulse_color)
+        paint(grid, center_pulse_x, pulse_y, pulse_on, pulse_color)
+
+        # Confetti first so the dancer stays on top.
         for p in particles:
             paint(grid, p.x, p.y, p.glyph, p.color)
-        for b in bugs:
-            # Bugs are painted after particles so their wide skip-cell
-            # isn't clobbered by a stray spark in the next column.
-            if b.stomped:
-                if b.splat_age <= SPLAT_LIFETIME:
-                    paint(grid, b.x, b.y, SPLAT_GLYPH, SPLAT_COLOR)
-                # else: splat has faded, leave the cell empty
-            else:
-                paint(grid, b.x, b.y, b.glyph, BUG_COLOR)
-        # Runner last so it wins its cells on top of its row. The runner
-        # glyphs are wide (2 cells), so paint() reserves the next column.
-        if 0 <= int(round(runner.x)) < width:
-            glyph = RUNNER_GLYPH_JUMP if runner.jumping else RUNNER_GLYPH_RUN
-            paint(grid, runner.x, runner.y, glyph, RUNNER_COLOR)
+
+        # Dancer.
+        draw_sprite(grid, dancer_x, dancer_y, pose, dancer_color)
+
+        # Motion accents near hands and feet.
+        if tick % 2 == 0:
+            paint(grid, dancer_x - 1, dancer_y + 1, "✦", "bright_white")
+            paint(grid, dancer_x + dancer_w, dancer_y + 1, "✦", "bright_white")
+            paint(grid, dancer_x + 2, dancer_y + 5, "·", "bright_white")
+            paint(grid, dancer_x + dancer_w - 3, dancer_y + 5, "·", "bright_white")
+        else:
+            paint(grid, dancer_x - 1, dancer_y + 4, "·", "bright_white")
+            paint(grid, dancer_x + dancer_w, dancer_y + 4, "·", "bright_white")
+            paint(grid, dancer_x + 3, dancer_y + 5, "✦", "bright_white")
+            paint(grid, dancer_x + dancer_w - 4, dancer_y + 5, "✦", "bright_white")
+
+        # Musical notes for extra silliness.
+        if tick % 3 == 0:
+            paint(grid, dancer_x + 1, dancer_y - 1, "♪", "bright_green")
+            paint(grid, dancer_x + dancer_w - 2, dancer_y - 1, "♪", "bright_green")
+        elif tick % 3 == 1:
+            paint(grid, dancer_x - 2, dancer_y + 1, "♫", "bright_cyan")
+            paint(grid, dancer_x + dancer_w + 1, dancer_y + 1, "♫", "bright_cyan")
 
         frames.append(grid_to_text(grid))
 
-    bug_caught = any(b.landed or b.stomped for b in bugs)
-    bug_stomped = any(b.stomped for b in bugs)
-    return frames, bug_caught, bug_stomped
+    return frames
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +355,6 @@ def precompute_frames(width: int, height: int) -> Tuple[List["Text"], bool, bool
 # ---------------------------------------------------------------------------
 
 def clear_recent_lines(console: "Console", line_count: int = 5) -> None:
-    """Wipe a few previous terminal lines so the canvas lands on a clean slate."""
     stream = console.file
     if not hasattr(stream, "isatty") or not stream.isatty():
         return
@@ -596,7 +365,6 @@ def clear_recent_lines(console: "Console", line_count: int = 5) -> None:
 
 
 def cursor_up_clear(console: "Console", lines: int) -> None:
-    """Move the cursor up ``lines`` rows and erase from there to end of screen."""
     stream = console.file
     stream.write(f"\x1b[{lines}A\x1b[J")
     stream.flush()
@@ -607,7 +375,6 @@ def build_banner(
     width: int,
     subtitle: Optional[str] = None,
 ) -> "Panel":
-    """Final reveal banner that replaces the fireworks canvas in place."""
     title = Text()
     title.append("⚡ ", style="bold bright_yellow")
     title.append(message, style="bold white")
@@ -640,19 +407,24 @@ def _grid_dimensions(console: "Console") -> Tuple[int, int]:
     return width, GRID_HEIGHT
 
 
+def _make_console() -> "Console":
+    try:
+        tty_file = open("/dev/tty", "w", buffering=1)
+    except OSError:
+        return Console()
+    return Console(file=tty_file, force_terminal=True)
+
+
 def render_rich() -> int:
-    console = Console()
+    console = _make_console()
 
     if not console.is_terminal:
-        # Non-tty (piped, captured): print one static banner and bail.
-        message = random.choice(MESSAGES)
-        console.print(build_banner(message, GRID_WIDTH_TARGET))
         return 0
 
     clear_recent_lines(console)
 
     width, height = _grid_dimensions(console)
-    frames, bug_caught, bug_stomped = precompute_frames(width, height)
+    frames = precompute_frames(width, height)
     deadline = time.monotonic() + DEADLINE_SECONDS
 
     for i, frame in enumerate(frames):
@@ -663,24 +435,16 @@ def render_rich() -> int:
         console.print(frame)
         time.sleep(FRAME_DELAY)
 
-    # Final reveal: erase the canvas and drop the banner in its place.
     cursor_up_clear(console, height)
     message = random.choice(MESSAGES)
-    if bug_stomped:
-        subtitle: Optional[str] = BUG_SUBTITLE_STOMPED
-    elif bug_caught:
-        subtitle = BUG_SUBTITLE_IGNORED
-    else:
-        subtitle = None
+    subtitle = random.choice(SUBTITLES)
     console.print(build_banner(message, width, subtitle=subtitle))
-
     return 0
 
 
 def render_plain_fallback() -> int:
-    """Print a single static line when Rich is unavailable — never block."""
     print()
-    print("  ⚡ MISSION COMPLETE ⚡")
+    print("  ⚡ EMOTE DEPLOYED ⚡")
     print()
     return 0
 
@@ -693,7 +457,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception:
-        # Hype must never break the parent agent's exit path.
+        # Celebration should never break parent flow.
         return 0
 
 
