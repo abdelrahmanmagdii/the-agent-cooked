@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -lc 'ROOT=\"${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}\"; /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/tty 2>/dev/null || /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/null 2>&1 || true'",
-            "timeout": 5
+            "command": "python3 \"${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/the-agent-cooked.py\" || true",
+            "timeout": 10
           }
         ]
       }
@@ -16,8 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -lc 'ROOT=\"${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}\"; /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/tty 2>/dev/null || /usr/bin/python3 \"$ROOT/scripts/the-agent-cooked.py\" >/dev/null 2>&1 || true'",
-            "timeout": 5
+            "command": "python3 \"${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/the-agent-cooked.py\" || true",
+            "timeout": 10
           }
         ]
       }

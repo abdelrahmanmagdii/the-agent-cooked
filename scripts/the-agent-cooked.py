@@ -444,10 +444,72 @@ def render_rich() -> int:
 
 
 def render_plain_fallback() -> int:
-    print()
-    print("  ⚡ EMOTE DEPLOYED ⚡")
-    print()
+    import sys
+
+    msg = random.choice(MESSAGES)
+    figure = random.choice(
+        [
+            ["  \\O/  ", "   |   ", "  / \\  "],
+            ["  _O/  ", "   |   ", "  / \\  "],
+            ["  \\O_  ", "   |   ", "  / \\  "],
+            [" \\O/   ", "  |\\   ", " / \\   "],
+        ]
+    )
+    sparks = random.choice(["✦", "•", "*"])
+
+    try:
+        out = open("/dev/tty", "w")
+    except OSError:
+        out = sys.stdout
+
+    w = 38
+    hr = "═" * (w - 2)
+    blank = f"  ║{' ' * (w - 2)}║"
+    pad = lambda s: f"  ║{s.center(w - 2)}║"
+
+    lines = [
+        "",
+        f"  {sparks}{' ' * (w - 2)}{sparks}",
+        f"  ╔{hr}╗",
+        blank,
+        pad(f"⚡ {msg} ⚡"),
+        blank,
+    ]
+    for row in figure:
+        lines.append(pad(row))
+    lines += [
+        blank,
+        pad("~ Winner Winner Chicken Dinner ~"),
+        f"  ╚{hr}╝",
+        f"  {sparks}{' ' * (w - 2)}{sparks}",
+        "",
+    ]
+
+    out.write("\n".join(lines) + "\n")
+    if out is not sys.stdout:
+        out.close()
     return 0
+
+
+def _ensure_rich() -> None:
+    """One-time silent install of rich if missing. No-op when already present."""
+    global Align, Console, Panel, Text
+    if Console is not None:
+        return
+    import subprocess, sys
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "rich"],
+            capture_output=True,
+            timeout=15,
+        )
+        from rich.align import Align as _A
+        from rich.console import Console as _C
+        from rich.panel import Panel as _P
+        from rich.text import Text as _T
+        Align, Console, Panel, Text = _A, _C, _P, _T
+    except Exception:
+        pass
 
 
 def main() -> int:
@@ -459,6 +521,7 @@ def main() -> int:
                     handle.write(f"{time.time()}\n")
             except OSError:
                 pass
+        _ensure_rich()
         if Console is None:
             return render_plain_fallback()
         return render_rich()
